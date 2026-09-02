@@ -269,6 +269,31 @@ export async function submitTidbTimestamp(
 
 // Convenience alias for repos whose submit form already imports `submitIntro`.
 export const submitIntro = submitTidbTimestamp;
+
+/**
+ * The user's TheIntroDB API key is stored in localStorage, NOT in the
+ * player preferences store. Preferences vary across backend versions and the
+ * tidb key field may not be supported (or be wiped on reset/sync). Reading
+ * public media does not need a key; only submissions do.
+ */
+const TIDB_KEY_STORAGE = "tidb:apiKey"; // localStorage key
+
+export function getTidbKey(): string | null {
+  try {
+    return window.localStorage.getItem(TIDB_KEY_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+export function setTidbKey(key: string | null): void {
+  try {
+    if (key) window.localStorage.setItem(TIDB_KEY_STORAGE, key);
+    else window.localStorage.removeItem(TIDB_KEY_STORAGE);
+  } catch {
+    /* ignore */
+  }
+}
 ```
 
 ### 1.4 camelCase variant (preferred for a clean green-field install)
@@ -349,6 +374,30 @@ export async function submitTidbTimestamp(
   apiKey: string,
 ): Promise<void> {
   await client.submitMediaTimestamp(input, { apiKey });
+}
+
+/**
+ * The user's TheIntroDB API key lives in localStorage, NOT in the preferences
+ * store (which differs across backend versions and may not support a tidb key
+ * field). Reading public media does not need a key; only submissions do.
+ */
+const TIDB_KEY_STORAGE = "tidb:apiKey";
+
+export function getTidbKey(): string | null {
+  try {
+    return window.localStorage.getItem(TIDB_KEY_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+export function setTidbKey(key: string | null): void {
+  try {
+    if (key) window.localStorage.setItem(TIDB_KEY_STORAGE, key);
+    else window.localStorage.removeItem(TIDB_KEY_STORAGE);
+  } catch {
+    /* ignore */
+  }
 }
 ```
 
@@ -745,19 +794,20 @@ If using camelCase segments (1.4), replace `start_ms`/`end_ms` with `startMs`/`e
 
 ```ts
 // interface
-tidbKey: string | null;        // or string; use null default
 enableAutoSkipSegments: boolean;
-setTidbKey(v: string | null): void;
 setEnableAutoSkipSegments(v: boolean): void;
 
 // defaults
-tidbKey: null,
 enableAutoSkipSegments: false,
 
 // setters (immer)
-setTidbKey(v) { set((s) => { s.tidbKey = v; }); },
 setEnableAutoSkipSegments(v) { set((s) => { s.enableAutoSkipSegments = v; }); },
 ```
+
+> ⚠️ **The TIDB API key is NOT a preference.** Do not add `tidbKey` here — the preferences
+> store may differ across backend versions, may not support the field, and can be wiped/reset.
+> Store it in **localStorage** instead via the `getTidbKey`/`setTidbKey` helpers in
+> `src/utils/tidb.ts` (Section 1.3/1.4). See Section 3.8 for the input.
 
 For `enableSkipCredits`:
 - If the repo **already has** an `enableSkipCredits` boolean preference (used by
@@ -781,7 +831,7 @@ import { Menu } from "@/components/player/internals/ContextMenu";
 import { TIDBSubmissionForm } from "@/components/player/TIDBSubmissionForm";
 import { useOverlayRouter } from "@/hooks/useOverlayRouter";
 import { usePlayerStore } from "@/stores/player/store";
-import { usePreferencesStore } from "@/stores/preferences";
+import { getTidbKey } from "@/utils/tidb";
 
 const TYPE_LABELS: Record<string, string> = {
   intro: "Intro",
@@ -794,7 +844,7 @@ export function SkipSegmentsView({ id }: { id: string }) {
   const router = useOverlayRouter(id);
   const display = usePlayerStore((s) => s.display);
   const segments = useSkipTime();
-  const tidbKey = usePreferencesStore((s) => s.tidbKey);
+  const tidbKey = getTidbKey();
   const [showForm, setShowForm] = useState(false);
 
   const handleSeek = (seconds: number) => display?.setTime(seconds);
@@ -818,7 +868,7 @@ export function SkipSegmentsView({ id }: { id: string }) {
             </Button>
           ) : (
             <div className="flex-1 text-center text-sm text-type-secondary p-3">
-              Enter your TheIntroDB API key in Connections settings to submit.
+              Add your TheIntroDB API key in Skip Segments settings to submit timestamps.
             </div>
           )}
         </div>
@@ -924,8 +974,7 @@ import { Modal, useModal } from "@/components/overlays/Modal";
 import { AuthInputBox } from "@/components/text-inputs/AuthInputBox";
 import { Heading3, Paragraph } from "@/components/utils/Text";
 import { usePlayerStore } from "@/stores/player/store";
-import { usePreferencesStore } from "@/stores/preferences";
-import { submitTidbTimestamp } from "@/utils/tidb";
+import { getTidbKey, submitTidbTimestamp } from "@/utils/tidb";
 
 type SegmentType = "intro" | "recap" | "credits" | "preview";
 
@@ -950,7 +999,7 @@ export function TIDBSubmissionForm(props: {
   onCancel?: () => void;
 }) {
   const meta = usePlayerStore((s) => s.meta);
-  const tidbKey = usePreferencesStore((s) => s.tidbKey);
+  const tidbKey = getTidbKey();
   const modal = useModal("tidb-submission");
   const [segment, setSegment] = useState<SegmentType>(props.segment.type);
   const [start, setStart] = useState("");
@@ -1043,16 +1092,53 @@ In State C, if the existing form imports `submitIntro` from `@/utils/tidb`, the 
 keeps it compiling — optionally rename to `submitTidbTimestamp` and use the package input shape
 above.
 
-### 3.8 API-key input (Settings → Connections)
+### 3.8 TIDB API-key input (settings menu, saved to localStorage)
 
-Add a "TheIntroDB" input bound to `preferences.tidbKey`. If the repo has a per-user backend
-settings sync (States B/C often do via a Connections/Settings page), thread `tidbKey` /
-`setTidbKey` through the same plumbing used by an existing key (e.g. febbox / debrid). If not
-(State A), a local preference input is sufficient — reads are public, only submissions need the
-key.
+Add a "TheIntroDB API Key" input under **Settings → Skip Segments** (i.e. in the settings menu,
+visible from `SettingsMenu.tsx`). It reads/writes the key **only** to **localStorage** via
+`getTidbKey`/`setTidbKey` — never to the preferences store or any backend, so it works
+regardless of backend version and survives whenever preferences are reset. The key is only
+needed to *submit* timestamps; reading public segments is unauthenticated.
 
-Model the component on the repo's existing key editors (an `AuthInputBox` with placeholder
-`theintrodb:user...`, `passwordToggleable`).
+Add a local-state settings section (a `Menu.Section`) where the key can live:
+
+```tsx
+import { useState } from "react";
+
+import { AuthInputBox } from "@/components/text-inputs/AuthInputBox";
+import { Heading3, Paragraph } from "@/components/utils/Text";
+import { getTidbKey, setTidbKey } from "@/utils/tidb";
+
+export function TidbKeyInput() {
+  const [key, setKey] = useState<string>(getTidbKey() ?? "");
+
+  return (
+    <div className="p-4 space-y-2">
+      <Heading3>TheIntroDB API Key</Heading3>
+      <Paragraph>
+        Used to submit timestamps. Stored locally in this browser only; not
+        required to view or auto-skip segments.
+      </Paragraph>
+      <AuthInputBox
+        value={key}
+        passwordToggleable
+        placeholder="theintrodb:user... (only needed to submit)"
+        onChange={(v) => {
+          setKey(v);
+          setTidbKey(v.trim() || null); // persist to localStorage
+        }}
+      />
+    </div>
+  );
+}
+```
+
+Mount `<TidbKeyInput />` inside the Skip Segments settings view (`SkipSegmentsView`),
+right above the segment list, or on the main settings menu near the other options. Because it
+reads the key from localStorage on mount, the Skip Segments view's `getTidbKey()` check and the
+Submit button react immediately once a key is entered and the view re-renders.
+
+> Don't gate auto-skip or segment *viewing* behind the key. The key is submit-only.
 
 ---
 
@@ -1069,7 +1155,10 @@ Model the component on the repo's existing key editors (an `AuthInputBox` with p
 5. Auto-skip skips intros/recaps/previews (when enabled) and credits (when enabled AND credits
    run to end of video).
 6. The Skip Segments settings view lists fetched segments and offers a submit flow.
-7. Submissions require the user's TIDB API key and POST through the `theintrodb` package.
+7. The TIDB API key can be entered in settings and is persisted to **localStorage**
+   (`getTidbKey`/`setTidbKey`), not the preferences store or any backend.
+8. Submissions require the user's TIDB API key (from localStorage) and POST through the
+   `theintrodb` package; segment *viewing* and auto-skip work without a key.
 
 ## 5. End state
 
