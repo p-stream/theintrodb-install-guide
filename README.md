@@ -1,3 +1,5 @@
+https://raw.githubusercontent.com/p-stream/theintrodb-install-guide/main/README.md
+
 # Install TheIntroDB (`theintrodb` npm package) into a movie-web / p-stream fork
 
 Coding-agent install guide. You are working **blind** — you have no reference implementation
